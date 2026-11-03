@@ -1,0 +1,6 @@
+{
+  "name": "Aesthetic Look",
+  "description": "Discover your style. Premium luxury fashion, grooming, tech, and lifestyle affiliate product discovery platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
