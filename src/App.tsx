@@ -48,7 +48,14 @@ function ScrollToTop() {
 // Protected Route Guard for Admin
 function AdminRouteGuard({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, userEmail, ownerEmail } = useAdminAuth();
-  if (!isAuthenticated || userEmail?.toLowerCase() !== ownerEmail.toLowerCase()) {
+  const localActive = typeof window !== 'undefined' && localStorage.getItem('aesthetic_look_owner_session') === 'true';
+  const localEmail = (typeof window !== 'undefined' ? localStorage.getItem('aesthetic_look_owner_email') || '' : '').toLowerCase();
+
+  const isAuthorized =
+    (isAuthenticated && userEmail?.toLowerCase() === ownerEmail.toLowerCase()) ||
+    (localActive && localEmail === ownerEmail.toLowerCase());
+
+  if (!isAuthorized) {
     return <Navigate to="/admin/login" replace />;
   }
   return <>{children}</>;

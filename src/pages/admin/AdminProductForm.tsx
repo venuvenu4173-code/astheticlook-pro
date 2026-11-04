@@ -16,9 +16,12 @@ import {
   Plus,
   Trash2,
   FileImage,
+  FolderTree,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { productService } from '../../services/productService';
-import { categoryService } from '../../services/categoryService';
+import { categoryService, CATEGORY_SQL_SEED } from '../../services/categoryService';
 import { uploadProductImage, validateImageFile, MAX_FILE_SIZE_BYTES } from '../../lib/storage';
 import { Product, ProductImage, Category } from '../../types';
 import { generateSlug, validateAffiliateUrl } from '../../utils/pricing';
@@ -42,6 +45,15 @@ export const AdminProductForm: React.FC = () => {
   const navigate = useNavigate();
 
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  const [seedingCategories, setSeedingCategories] = useState(false);
+  const [copiedSqlSeed, setCopiedSqlSeed] = useState(false);
+  const [isUsingPresets, setIsUsingPresets] = useState(false);
+  const [showQuickAddCategory, setShowQuickAddCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [quickAddLoading, setQuickAddLoading] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(isEditing);
 
@@ -68,45 +80,173 @@ export const AdminProductForm: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    categoryService.getCategories(false).then((cats) => {
-      setCategories(cats);
-      if (cats.length > 0 && !categoryId) {
-        setCategoryId(cats[0].id);
+  const loadCategories = async (): Promise<Category[]> => {
+    setCategoriesLoading(true);
+    setCategoriesError(null);
+    try {
+      const cats = await categoryService.getCategories(false);
+      if (cats && cats.length > 0) {
+        setCategories(cats);
+        setIsUsingPresets(false);
+        return cats;
+      } else {
+        const presets = categoryService.getStandardPresetCategories();
+        setCategories(presets);
+        setIsUsingPresets(true);
+        return presets;
       }
-    });
+    } catch (err: any) {
+      console.error('Failed to load categories:', err);
+      setCategoriesError(err.message || 'Failed to load categories from database.');
+      const presets = categoryService.getStandardPresetCategories();
+      setCategories(presets);
+      setIsUsingPresets(true);
+      return presets;
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
 
-    if (isEditing && id) {
-      productService.getProducts({ onlyActive: false }).then((prods) => {
-        const target = prods.find((p) => p.id === id);
-        if (target) {
-          setName(target.name);
-          setSlug(target.slug);
+  const handleCopySqlSeed = () => {
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(CATEGORY_SQL_SEED);
+      setCopiedSqlSeed(true);
+      setTimeout(() => setCopiedSqlSeed(false), 3000);
+    }
+  };
+
+  const handleSeedStandardCategories = async () => {
+    setSeedingCategories(true);
+    setCategoriesError(null);
+    try {
+      const seeded = await categoryService.ensureStandardCategories();
+      setCategories(seeded);
+      setIsUsingPresets(false);
+      if (seeded.length > 0 && !categoryId) {
+        setCategoryId(seeded[0].id);
+      }
+      setFormSuccess('The 6 standard luxury categories have been initialized successfully!');
+      setTimeout(() => setFormSuccess(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to initialize categories in Supabase:', err);
+      // Pre-populate with standard preset categories so dropdown works immediately
+      const presets = categoryService.getStandardPresetCategories();
+      setCategories(presets);
+      setIsUsingPresets(true);
+      if (presets.length > 0 && !categoryId) {
+        setCategoryId(presets[0].id);
+      }
+      setCategoriesError(err.message || 'Failed to initialize categories in database.');
+    } finally {
+      setSeedingCategories(false);
+    }
+  };
+
+  const handleQuickAddCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategoryName.trim()) return;
+    setQuickAddLoading(true);
+    try {
+      const created = await categoryService.createCategory({
+        name: newCategoryName.trim(),
+        slug: generateSlug(newCategoryName.trim()),
+      });
+      const updatedCats = await categoryService.getCategories(false);
+      setCategories(updatedCats);
+      setIsUsingPresets(false);
+      setCategoryId(created.id);
+      setNewCategoryName('');
+      setShowQuickAddCategory(false);
+      setFormSuccess(`Category "${created.name}" created and selected!`);
+      setTimeout(() => setFormSuccess(null), 3000);
+    } catch (err: any) {
+      alert(`Could not create category: ${err.message}`);
+    } finally {
+      setQuickAddLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const initializeData = async () => {
+      setCategoriesLoading(true);
+      setCategoriesError(null);
+
+      try {
+        const [cats, targetProduct] = await Promise.all([
+          categoryService.getCategories(false),
+          isEditing && id ? productService.getProductById(id) : Promise.resolve(null),
+        ]);
+
+        let effectiveCats = cats;
+        if (!cats || cats.length === 0) {
+          effectiveCats = categoryService.getStandardPresetCategories();
+          setIsUsingPresets(true);
+        } else {
+          setIsUsingPresets(false);
+        }
+        setCategories(effectiveCats);
+
+        if (isEditing && targetProduct) {
+          setName(targetProduct.name);
+          setSlug(targetProduct.slug);
           setSlugCustomized(true);
-          setShortDescription(target.shortDescription || '');
-          setDescription(target.description || '');
-          setCategoryId(target.categoryId);
-          setAffiliatePlatform(target.affiliatePlatform);
-          setAffiliateUrl(target.affiliateUrl);
-          setCurrentPrice(target.currentPrice != null ? String(target.currentPrice) : '');
-          setOriginalPrice(target.originalPrice != null ? String(target.originalPrice) : '');
-          setIsFeatured(target.isFeatured);
-          setIsTrending(target.isTrending);
-          setIsActive(target.isActive);
+          setShortDescription(targetProduct.shortDescription || '');
+          setDescription(targetProduct.description || '');
+          setAffiliatePlatform(targetProduct.affiliatePlatform);
+          setAffiliateUrl(targetProduct.affiliateUrl);
+          setCurrentPrice(targetProduct.currentPrice != null ? String(targetProduct.currentPrice) : '');
+          setOriginalPrice(targetProduct.originalPrice != null ? String(targetProduct.originalPrice) : '');
+          setIsFeatured(targetProduct.isFeatured);
+          setIsTrending(targetProduct.isTrending);
+          setIsActive(targetProduct.isActive);
 
-          const existingImgs: PendingUpload[] = (target.images || []).map((img, idx) => ({
+          // Match current category accurately from fetched categories
+          const targetCatKey = (targetProduct.categoryId || '').replace(/^(preset-|cat-)/, '').toLowerCase();
+          const matched = effectiveCats.find(
+            (c) =>
+              c.id === targetProduct.categoryId ||
+              c.slug === targetProduct.categoryId ||
+              c.slug.replace(/^preset-/, '') === targetCatKey ||
+              c.name.toLowerCase() === targetProduct.categoryName?.toLowerCase()
+          );
+
+          if (matched) {
+            setCategoryId(matched.id);
+          } else if (targetProduct.categoryId) {
+            setCategoryId(targetProduct.categoryId);
+          }
+
+          const existingImgs: PendingUpload[] = (targetProduct.images || []).map((img, idx) => ({
             id: img.id || `img-${idx}`,
             previewUrl: img.publicUrl,
             storagePath: img.storagePath,
             isMain: img.isMain,
-            altText: img.altText || target.name,
+            altText: img.altText || targetProduct.name,
             status: 'success',
           }));
           setImages(existingImgs);
+        } else {
+          // In Add mode: default to first category if available
+          if (effectiveCats.length > 0 && !categoryId) {
+            setCategoryId(effectiveCats[0].id);
+          }
         }
+      } catch (err: any) {
+        console.error('Initialization error in AdminProductForm:', err);
+        setCategoriesError(err.message || 'Failed to initialize categories.');
+        const presets = categoryService.getStandardPresetCategories();
+        setCategories(presets);
+        setIsUsingPresets(true);
+        if (presets.length > 0 && !categoryId) {
+          setCategoryId(presets[0].id);
+        }
+      } finally {
+        setCategoriesLoading(false);
         setInitialLoading(false);
-      });
-    }
+      }
+    };
+
+    initializeData();
   }, [id, isEditing]);
 
   const handleNameChange = (val: string) => {
@@ -224,6 +364,15 @@ export const AdminProductForm: React.FC = () => {
       setFormError('Product slug is required.');
       return;
     }
+    if (!categoryId || !categoryId.trim()) {
+      setFormError('Please select a category for this product.');
+      return;
+    }
+    const selectedCategory = categories.find((c) => c.id === categoryId);
+    if (!selectedCategory) {
+      setFormError('Please select a valid category from the list.');
+      return;
+    }
     if (!affiliateUrl.trim()) {
       setFormError('Affiliate store URL is required.');
       return;
@@ -288,8 +437,8 @@ export const AdminProductForm: React.FC = () => {
         slug: generateSlug(slug),
         shortDescription,
         description,
-        categoryId,
-        categoryName: categories.find((c) => c.id === categoryId)?.name,
+        categoryId: selectedCategory.id,
+        categoryName: selectedCategory.name,
         affiliatePlatform,
         affiliateUrl,
         currentPrice: parsedCurrentPrice,
@@ -422,23 +571,186 @@ export const AdminProductForm: React.FC = () => {
               />
             </div>
 
-            {/* Category */}
+            {/* Curated Category Selection */}
             <div>
-              <label className="block text-xs uppercase tracking-wider text-[#7A6E65] font-semibold mb-1.5">
-                Curated Category *
-              </label>
-              <select
-                required
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-                className="w-full px-4 py-2.5 bg-[#FAF8F5] border border-[#D8D2C6] rounded-xl text-xs font-medium text-[#1A1816] focus:outline-none focus:border-[#1A1816]"
-              >
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between mb-1.5">
+                <label
+                  htmlFor="product-category-select"
+                  className="text-xs uppercase tracking-wider text-[#7A6E65] font-semibold flex items-center gap-1.5"
+                >
+                  <FolderTree className="w-3.5 h-3.5 text-[#A67C52]" />
+                  <span>Curated Category *</span>
+                </label>
+                {!categoriesLoading && (
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickAddCategory(!showQuickAddCategory)}
+                    className="text-[11px] text-[#A67C52] hover:text-[#1A1816] font-medium flex items-center gap-1 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{showQuickAddCategory ? 'Cancel' : 'New Category'}</span>
+                  </button>
+                )}
+              </div>
+
+              {categoriesLoading ? (
+                <div className="flex items-center gap-2.5 px-4 py-2.5 bg-[#FAF8F5] border border-[#D8D2C6] rounded-xl text-xs text-[#8C7E74]">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#A67C52]" />
+                  <span>Loading categories from database...</span>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {categoriesError && (
+                    <div className="p-3 bg-[#FAF0ED] border border-[#F2C4B8] rounded-xl text-xs text-[#8E3B29] space-y-2">
+                      <div className="flex items-start gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span className="leading-relaxed">{categoriesError}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleCopySqlSeed}
+                          className="px-2.5 py-1 bg-[#1A1816] text-[#F5F2EB] rounded text-[11px] font-semibold hover:bg-[#2E2A26] flex items-center gap-1 transition-colors"
+                        >
+                          {copiedSqlSeed ? (
+                            <>
+                              <Check className="w-3 h-3 text-[#A8D5BA]" />
+                              <span>SQL Seed Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-[#D8D2C6]" />
+                              <span>Copy Category SQL Seed</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => loadCategories()}
+                          className="px-2.5 py-1 bg-white border border-[#D8D2C6] text-[#1A1816] rounded text-[11px] font-semibold hover:bg-[#FAF8F5] transition-colors"
+                        >
+                          Retry Sync
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="relative">
+                    <select
+                      id="product-category-select"
+                      required
+                      value={categoryId}
+                      onChange={(e) => setCategoryId(e.target.value)}
+                      className="w-full px-4 py-2.5 bg-[#FAF8F5] border border-[#D8D2C6] rounded-xl text-xs font-medium text-[#1A1816] focus:outline-none focus:border-[#1A1816] transition-colors appearance-none cursor-pointer pr-10"
+                    >
+                      <option value="" disabled>
+                        -- Select a curated category * --
+                      </option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3.5 text-[#7A6E65]">
+                      <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20">
+                        <path
+                          d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                          clipRule="evenodd"
+                          fillRule="evenodd"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+
+                  {isUsingPresets && !categoriesError && (
+                    <div className="p-3.5 bg-[#FAF6F0] border border-[#E8DEC8] rounded-xl text-xs space-y-2.5">
+                      <div className="flex items-start gap-2">
+                        <Sparkles className="w-4 h-4 text-[#A67C52] shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-[#3A332C] font-semibold">
+                            Standard Curated Categories Available
+                          </p>
+                          <p className="text-[#6B5A4B] leading-relaxed mt-0.5">
+                            The 6 standard categories are loaded and ready in the dropdown below. Click &quot;Initialize 6 Standard Categories&quot; to save them directly to your Supabase database, or copy the SQL seed to run in your Supabase SQL Editor.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={seedingCategories}
+                          onClick={handleSeedStandardCategories}
+                          className="px-3 py-1.5 bg-[#1A1816] text-[#F5F2EB] text-[11px] font-semibold tracking-wider uppercase rounded-lg hover:bg-[#2E2A26] transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          {seedingCategories ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              <span>Syncing to Supabase...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 text-[#E8DEC8]" />
+                              <span>Initialize 6 Standard Categories</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCopySqlSeed}
+                          className="px-2.5 py-1.5 bg-white border border-[#D8D2C6] text-[#1A1816] rounded-lg text-[11px] font-semibold hover:bg-[#FAF8F5] flex items-center gap-1 transition-colors"
+                        >
+                          {copiedSqlSeed ? (
+                            <>
+                              <Check className="w-3 h-3 text-[#388E3C]" />
+                              <span>SQL Seed Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3 text-[#7A6E65]" />
+                              <span>Copy Category SQL Seed</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <div className="text-[10px] text-[#8C7E74]">
+                        Curated Categories: Fashion & Accessories, Grooming & Skincare, Tech Gadgets, Lifestyle, Budget Finds, Trending Deals
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Inline Quick Add Category Form */}
+              {showQuickAddCategory && (
+                <div className="mt-3 p-3 bg-[#FAF8F5] border border-[#D8D2C6] rounded-xl space-y-2 animate-fade-in">
+                  <span className="text-[11px] uppercase tracking-wider text-[#7A6E65] font-semibold block">
+                    Create New Category
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Category name (e.g. Travel Gear)"
+                      className="flex-1 px-3 py-1.5 bg-white border border-[#D8D2C6] rounded-lg text-xs text-[#1A1816] focus:outline-none focus:border-[#1A1816]"
+                    />
+                    <button
+                      type="button"
+                      disabled={quickAddLoading || !newCategoryName.trim()}
+                      onClick={handleQuickAddCategory}
+                      className="px-3 py-1.5 bg-[#1A1816] text-[#F5F2EB] text-xs font-medium rounded-lg hover:bg-[#2E2A26] transition-colors disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {quickAddLoading ? (
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Plus className="w-3 h-3" />
+                      )}
+                      <span>Add</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Affiliate Retailer */}

@@ -34,6 +34,26 @@ function saveLocalProducts(products: Product[]): void {
   }
 }
 
+async function resolveCategoryUUID(rawIdOrSlug?: string, categoryName?: string): Promise<string | null> {
+  if (!rawIdOrSlug || !supabase) return null;
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawIdOrSlug);
+  if (isUUID) return rawIdOrSlug;
+
+  try {
+    const cleanSlug = rawIdOrSlug.replace(/^preset-/, '').trim();
+    const { data } = await supabase
+      .from('categories')
+      .select('id')
+      .or(`slug.eq.${cleanSlug},slug.eq.${rawIdOrSlug},name.ilike.%${categoryName || cleanSlug}%`)
+      .limit(1)
+      .maybeSingle();
+
+    return data ? data.id : null;
+  } catch {
+    return null;
+  }
+}
+
 export const productService = {
   async getProducts(options?: {
     onlyActive?: boolean;
@@ -47,7 +67,8 @@ export const productService = {
           .from('products')
           .select(`
             *,
-            images:product_images(*)
+            images:product_images(*),
+            category:categories(id, name, slug)
           `)
           .order('created_at', { ascending: false });
 
@@ -65,14 +86,15 @@ export const productService = {
         }
 
         const { data, error } = await query;
-        if (!error && data) {
+        if (!error && data && data.length > 0) {
           return data.map((item) => ({
             id: item.id,
             name: item.name,
             slug: item.slug,
             shortDescription: item.short_description || '',
             description: item.description || '',
-            categoryId: item.category_id,
+            categoryId: item.category_id || item.category?.id || '',
+            categoryName: item.category?.name || '',
             affiliatePlatform: item.affiliate_platform,
             affiliateUrl: item.affiliate_url,
             currentPrice: item.current_price != null ? Number(item.current_price) : null,
@@ -84,7 +106,7 @@ export const productService = {
               id: img.id,
               productId: img.product_id,
               storagePath: img.storage_path,
-              publicUrl: img.public_url,
+              publicUrl: img.publicUrl || img.public_url,
               altText: img.alt_text,
               isMain: Boolean(img.is_main),
               displayOrder: Number(img.display_order || 0),
@@ -115,6 +137,60 @@ export const productService = {
     return list;
   },
 
+  async getProductById(id: string): Promise<Product | null> {
+    if (isSupabaseConfigured && supabase) {
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      if (isUUID) {
+        try {
+          const { data, error } = await supabase
+            .from('products')
+            .select(`
+              *,
+              images:product_images(*),
+              category:categories(id, name, slug)
+            `)
+            .eq('id', id)
+            .maybeSingle();
+
+          if (!error && data) {
+            return {
+              id: data.id,
+              name: data.name,
+              slug: data.slug,
+              shortDescription: data.short_description || '',
+              description: data.description || '',
+              categoryId: data.category_id || data.category?.id || '',
+              categoryName: data.category?.name || '',
+              affiliatePlatform: data.affiliate_platform,
+              affiliateUrl: data.affiliate_url,
+              currentPrice: data.current_price != null ? Number(data.current_price) : null,
+              originalPrice: data.original_price != null ? Number(data.original_price) : null,
+              isFeatured: Boolean(data.is_featured),
+              isTrending: Boolean(data.is_trending),
+              isActive: Boolean(data.is_active),
+              images: (data.images || []).map((img: any) => ({
+                id: img.id,
+                productId: img.product_id,
+                storagePath: img.storage_path,
+                publicUrl: img.publicUrl || img.public_url,
+                altText: img.alt_text,
+                isMain: Boolean(img.is_main),
+                displayOrder: Number(img.display_order || 0),
+              })).sort((a: ProductImage, b: ProductImage) => a.displayOrder - b.displayOrder),
+              createdAt: data.created_at,
+              updatedAt: data.updated_at,
+            };
+          }
+        } catch (err) {
+          console.warn('Supabase getProductById error:', err);
+        }
+      }
+    }
+
+    const localList = getLocalProducts();
+    return localList.find((p) => p.id === id) || null;
+  },
+
   async getProductBySlug(slug: string): Promise<Product | null> {
     if (isSupabaseConfigured && supabase) {
       try {
@@ -122,7 +198,8 @@ export const productService = {
           .from('products')
           .select(`
             *,
-            images:product_images(*)
+            images:product_images(*),
+            category:categories(id, name, slug)
           `)
           .eq('slug', slug)
           .maybeSingle();
@@ -134,7 +211,8 @@ export const productService = {
             slug: data.slug,
             shortDescription: data.short_description || '',
             description: data.description || '',
-            categoryId: data.category_id,
+            categoryId: data.category_id || data.category?.id || '',
+            categoryName: data.category?.name || '',
             affiliatePlatform: data.affiliate_platform,
             affiliateUrl: data.affiliate_url,
             currentPrice: data.current_price != null ? Number(data.current_price) : null,
@@ -171,6 +249,7 @@ export const productService = {
     const slug = productData.slug || generateSlug(productData.name);
 
     if (isSupabaseConfigured && supabase) {
+      const resolvedCategoryId = await resolveCategoryUUID(productData.categoryId, productData.categoryName);
       const { data: productRow, error: productError } = await supabase
         .from('products')
         .insert({
@@ -178,7 +257,7 @@ export const productService = {
           slug,
           short_description: productData.shortDescription,
           description: productData.description,
-          category_id: productData.categoryId,
+          category_id: resolvedCategoryId,
           affiliate_platform: productData.affiliatePlatform,
           affiliate_url: productData.affiliateUrl,
           current_price: productData.currentPrice,
@@ -233,7 +312,9 @@ export const productService = {
       if (updates.slug !== undefined) updatePayload.slug = updates.slug;
       if (updates.shortDescription !== undefined) updatePayload.short_description = updates.shortDescription;
       if (updates.description !== undefined) updatePayload.description = updates.description;
-      if (updates.categoryId !== undefined) updatePayload.category_id = updates.categoryId;
+      if (updates.categoryId !== undefined) {
+        updatePayload.category_id = await resolveCategoryUUID(updates.categoryId, updates.categoryName);
+      }
       if (updates.affiliatePlatform !== undefined) updatePayload.affiliate_platform = updates.affiliatePlatform;
       if (updates.affiliateUrl !== undefined) updatePayload.affiliate_url = updates.affiliateUrl;
       if (updates.currentPrice !== undefined) updatePayload.current_price = updates.currentPrice;

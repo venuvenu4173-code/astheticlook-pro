@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Edit2, Trash2, Check, X, ArrowUp, ArrowDown, FolderTree } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, ArrowUp, ArrowDown, FolderTree, Sparkles, RefreshCw } from 'lucide-react';
 import { categoryService } from '../../services/categoryService';
 import { productService } from '../../services/productService';
 import { Category } from '../../types';
@@ -9,6 +9,7 @@ export const AdminCategories: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [productCounts, setProductCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
 
   // Form states
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -33,6 +34,18 @@ export const AdminCategories: React.FC = () => {
     setCategories(cats);
     setProductCounts(counts);
     setLoading(false);
+  };
+
+  const handleSeedStandard = async () => {
+    setSeeding(true);
+    try {
+      await categoryService.ensureStandardCategories();
+      await loadData();
+    } catch (err: any) {
+      alert(`Error initializing standard categories: ${err.message}`);
+    } finally {
+      setSeeding(false);
+    }
   };
 
   useEffect(() => {
@@ -178,6 +191,30 @@ export const AdminCategories: React.FC = () => {
               <tr>
                 <td colSpan={6} className="py-12 text-center text-[#8C7E74]">
                   Loading categories...
+                </td>
+              </tr>
+            ) : categories.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="py-12 text-center space-y-3">
+                  <p className="text-xs text-[#8C7E74]">No categories found in the database.</p>
+                  <button
+                    type="button"
+                    disabled={seeding}
+                    onClick={handleSeedStandard}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#1A1816] text-[#FAF8F5] text-xs font-semibold rounded-xl hover:bg-[#2C2622] transition-colors disabled:opacity-50"
+                  >
+                    {seeding ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Initializing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-[#E8DEC8]" />
+                        <span>Initialize 6 Standard Categories</span>
+                      </>
+                    )}
+                  </button>
                 </td>
               </tr>
             ) : (

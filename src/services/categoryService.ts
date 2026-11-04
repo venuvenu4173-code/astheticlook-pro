@@ -5,6 +5,26 @@ import { generateSlug } from '../utils/pricing';
 
 const LOCAL_STORAGE_KEY = 'aesthetic_look_categories';
 
+export const STANDARD_CATEGORIES = [
+  { name: 'Fashion & Accessories', slug: 'fashion-accessories', displayOrder: 1 },
+  { name: 'Grooming & Skincare', slug: 'grooming-skincare', displayOrder: 2 },
+  { name: 'Tech Gadgets', slug: 'tech-gadgets', displayOrder: 3 },
+  { name: 'Lifestyle', slug: 'lifestyle', displayOrder: 4 },
+  { name: 'Budget Finds', slug: 'budget-finds', displayOrder: 5 },
+  { name: 'Trending Deals', slug: 'trending-deals', displayOrder: 6 },
+];
+
+export const CATEGORY_SQL_SEED = `-- Curated Standard Categories Seed
+INSERT INTO public.categories (name, slug, display_order, is_active)
+VALUES
+    ('Fashion & Accessories', 'fashion-accessories', 1, TRUE),
+    ('Grooming & Skincare', 'grooming-skincare', 2, TRUE),
+    ('Tech Gadgets', 'tech-gadgets', 3, TRUE),
+    ('Lifestyle', 'lifestyle', 4, TRUE),
+    ('Budget Finds', 'budget-finds', 5, TRUE),
+    ('Trending Deals', 'trending-deals', 6, TRUE)
+ON CONFLICT (slug) DO NOTHING;`;
+
 function checkOwnerAuthorized(): void {
   const sessionActive = localStorage.getItem('aesthetic_look_owner_session') === 'true';
   const email = (localStorage.getItem('aesthetic_look_owner_email') || '').toLowerCase();
@@ -35,6 +55,9 @@ function saveLocalCategories(categories: Category[]): void {
 }
 
 export const categoryService = {
+  /**
+   * Retrieves all categories from Supabase (or local fallback).
+   */
   async getCategories(onlyActive = true): Promise<Category[]> {
     if (isSupabaseConfigured && supabase) {
       try {
@@ -59,8 +82,12 @@ export const categoryService = {
             createdAt: item.created_at,
           }));
         }
+
+        if (error) {
+          console.warn('Supabase getCategories error, checking fallback:', error.message);
+        }
       } catch (err) {
-        console.warn('Supabase getCategories error, falling back to local:', err);
+        console.warn('Supabase getCategories exception:', err);
       }
     }
 
@@ -68,6 +95,71 @@ export const categoryService = {
     return onlyActive ? list.filter((c) => c.isActive) : list;
   },
 
+  getStandardPresetCategories(): Category[] {
+    return STANDARD_CATEGORIES.map((cat) => ({
+      id: `preset-${cat.slug}`,
+      name: cat.name,
+      slug: cat.slug,
+      isActive: true,
+      displayOrder: cat.displayOrder,
+      productCount: 0,
+    }));
+  },
+
+  /**
+   * Initializes or updates the 6 required standard categories in Supabase without duplicates.
+   */
+  async ensureStandardCategories(): Promise<Category[]> {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const rows = STANDARD_CATEGORIES.map((cat) => ({
+          name: cat.name,
+          slug: cat.slug,
+          is_active: true,
+          display_order: cat.displayOrder,
+        }));
+
+        const { data, error } = await supabase
+          .from('categories')
+          .upsert(rows, { onConflict: 'slug' })
+          .select();
+
+        if (error) {
+          console.warn('Supabase RLS prevented direct category insert:', error.message);
+          saveLocalCategories(INITIAL_CATEGORIES);
+          if (error.code === '42501' || error.message.includes('row-level security')) {
+            throw new Error(
+              'Supabase Row-Level Security requires an authenticated owner session. Please sign in with your verified owner account (ashokboya4173@gmail.com) via Admin Login, or run the Category SQL Seed in your Supabase SQL Editor.'
+            );
+          }
+          throw new Error(error.message);
+        }
+
+        if (data && data.length > 0) {
+          return data.map((item) => ({
+            id: item.id,
+            name: item.name,
+            slug: item.slug,
+            imagePath: item.image_path,
+            isActive: Boolean(item.is_active),
+            displayOrder: Number(item.display_order || 0),
+            createdAt: item.created_at,
+          }));
+        }
+
+        return this.getCategories(false);
+      } catch (err: any) {
+        throw err;
+      }
+    }
+
+    saveLocalCategories(INITIAL_CATEGORIES);
+    return INITIAL_CATEGORIES;
+  },
+
+  /**
+   * Creates a new category ensuring no duplicate slugs.
+   */
   async createCategory(data: { name: string; slug?: string; imagePath?: string }): Promise<Category> {
     checkOwnerAuthorized();
     const slug = data.slug || generateSlug(data.name);
@@ -75,13 +167,16 @@ export const categoryService = {
     if (isSupabaseConfigured && supabase) {
       const { data: row, error } = await supabase
         .from('categories')
-        .insert({
-          name: data.name,
-          slug,
-          image_path: data.imagePath,
-          is_active: true,
-          display_order: 99,
-        })
+        .upsert(
+          {
+            name: data.name.trim(),
+            slug,
+            image_path: data.imagePath,
+            is_active: true,
+            display_order: 99,
+          },
+          { onConflict: 'slug' }
+        )
         .select()
         .single();
 
@@ -98,6 +193,10 @@ export const categoryService = {
     }
 
     const list = getLocalCategories();
+    // Prevent duplicate slugs
+    const existing = list.find((c) => c.slug === slug);
+    if (existing) return existing;
+
     const newCategory: Category = {
       id: `cat-local-${Date.now()}`,
       name: data.name,
@@ -116,7 +215,7 @@ export const categoryService = {
     checkOwnerAuthorized();
     if (isSupabaseConfigured && supabase) {
       const payload: Record<string, any> = {};
-      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.name !== undefined) payload.name = updates.name.trim();
       if (updates.slug !== undefined) payload.slug = updates.slug;
       if (updates.imagePath !== undefined) payload.image_path = updates.imagePath;
       if (updates.isActive !== undefined) payload.is_active = updates.isActive;

@@ -304,3 +304,17 @@ DROP POLICY IF EXISTS "Admins can delete from product images bucket" ON storage.
 CREATE POLICY "Admins can delete from product images bucket"
 ON storage.objects FOR DELETE
 USING (bucket_id = 'product-images' AND public.is_admin());
+
+-- ------------------------------------------------------------------------------
+-- 17. INITIAL SEED: CURATED STANDARD CATEGORIES
+-- ------------------------------------------------------------------------------
+INSERT INTO public.categories (name, slug, display_order, is_active)
+VALUES
+    ('Fashion & Accessories', 'fashion-accessories', 1, TRUE),
+    ('Grooming & Skincare', 'grooming-skincare', 2, TRUE),
+    ('Tech Gadgets', 'tech-gadgets', 3, TRUE),
+    ('Lifestyle', 'lifestyle', 4, TRUE),
+    ('Budget Finds', 'budget-finds', 5, TRUE),
+    ('Trending Deals', 'trending-deals', 6, TRUE)
+ON CONFLICT (slug) DO NOTHING;
+

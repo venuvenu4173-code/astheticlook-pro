@@ -10,7 +10,8 @@ interface AdminAuthContextType {
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>;
-  changePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  changePassword: (arg1: string, arg2?: string) => Promise<{ success: boolean; error?: string }>;
+  updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AdminAuthContext = createContext<AdminAuthContextType | null>(null);
@@ -25,6 +26,26 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [userEmail, setUserEmail] = useState<string | null>(() => {
     return localStorage.getItem(STORAGE_EMAIL_KEY) || null;
   });
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const active = localStorage.getItem(STORAGE_SESSION_KEY) === 'true';
+      const email = localStorage.getItem(STORAGE_EMAIL_KEY);
+      if (active && email?.toLowerCase() === AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+        setIsAuthenticated(true);
+        setUserEmail(email);
+      } else if (!active) {
+        setIsAuthenticated(false);
+        setUserEmail(null);
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('aesthetic_auth_sync', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('aesthetic_auth_sync', handleStorageChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (isSupabaseConfigured && supabase) {
@@ -46,10 +67,15 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             localStorage.removeItem(STORAGE_EMAIL_KEY);
           }
         } else {
-          setIsAuthenticated(false);
-          setUserEmail(null);
-          localStorage.removeItem(STORAGE_SESSION_KEY);
-          localStorage.removeItem(STORAGE_EMAIL_KEY);
+          const localOwner = (localStorage.getItem(STORAGE_EMAIL_KEY) || '').toLowerCase();
+          const localActive = localStorage.getItem(STORAGE_SESSION_KEY) === 'true';
+          if (localActive && localOwner === AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+            setIsAuthenticated(true);
+            setUserEmail(AUTHORIZED_OWNER_EMAIL);
+          } else {
+            setIsAuthenticated(false);
+            setUserEmail(null);
+          }
         }
       });
 
@@ -69,11 +95,15 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             localStorage.removeItem(STORAGE_SESSION_KEY);
             localStorage.removeItem(STORAGE_EMAIL_KEY);
           }
-        } else {
-          setIsAuthenticated(false);
-          setUserEmail(null);
-          localStorage.removeItem(STORAGE_SESSION_KEY);
-          localStorage.removeItem(STORAGE_EMAIL_KEY);
+        } else if (_event === 'SIGNED_OUT') {
+          const localOwner = (localStorage.getItem(STORAGE_EMAIL_KEY) || '').toLowerCase();
+          const localActive = localStorage.getItem(STORAGE_SESSION_KEY) === 'true';
+          if (!localActive || localOwner !== AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+            setIsAuthenticated(false);
+            setUserEmail(null);
+            localStorage.removeItem(STORAGE_SESSION_KEY);
+            localStorage.removeItem(STORAGE_EMAIL_KEY);
+          }
         }
       });
 
@@ -171,7 +201,9 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   };
 
-  const changePassword = async (newPassword: string): Promise<{ success: boolean; error?: string }> => {
+  const changePassword = async (arg1: string, arg2?: string): Promise<{ success: boolean; error?: string }> => {
+    const targetPassword = arg2 !== undefined ? arg2 : arg1;
+
     if (!isAuthenticated || !userEmail) {
       return {
         success: false,
@@ -179,7 +211,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       };
     }
 
-    if (newPassword.length < 8) {
+    if (targetPassword.length < 8) {
       return {
         success: false,
         error: 'Password must be at least 8 characters long.',
@@ -195,7 +227,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     try {
       const { error } = await supabase.auth.updateUser({
-        password: newPassword,
+        password: targetPassword,
       });
 
       if (error) {
@@ -218,6 +250,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         logout,
         sendPasswordReset,
         changePassword,
+        updatePassword: changePassword,
       }}
     >
       {children}
