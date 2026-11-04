@@ -1,63 +1,107 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase';
 
+export const AUTHORIZED_OWNER_EMAIL = 'ashokboya4173@gmail.com';
+
 interface AdminAuthContextType {
   isAuthenticated: boolean;
   userEmail: string | null;
+  ownerEmail: string;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  isDemoAuth: boolean;
-  demoLogin: () => void;
+  sendPasswordReset: (email: string) => Promise<{ success: boolean; error?: string }>;
+  changePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 const AdminAuthContext = createContext<AdminAuthContextType | null>(null);
 
-const DEMO_STORAGE_KEY = 'aesthetic_look_admin_session';
+const STORAGE_SESSION_KEY = 'aesthetic_look_owner_session';
+const STORAGE_EMAIL_KEY = 'aesthetic_look_owner_email';
 
 export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem(DEMO_STORAGE_KEY) === 'true';
+    return localStorage.getItem(STORAGE_SESSION_KEY) === 'true';
   });
   const [userEmail, setUserEmail] = useState<string | null>(() => {
-    return localStorage.getItem('aesthetic_look_admin_email') || null;
-  });
-  const [isDemoAuth, setIsDemoAuth] = useState<boolean>(() => {
-    return localStorage.getItem('aesthetic_look_is_demo') === 'true';
+    return localStorage.getItem(STORAGE_EMAIL_KEY) || null;
   });
 
   useEffect(() => {
     if (isSupabaseConfigured && supabase) {
+      // 1. Verify current session
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user) {
-          setIsAuthenticated(true);
-          setUserEmail(session.user.email || 'admin@aestheticlook.pro');
-          setIsDemoAuth(false);
+          const email = (session.user.email || '').toLowerCase();
+          if (email === AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+            setIsAuthenticated(true);
+            setUserEmail(session.user.email || AUTHORIZED_OWNER_EMAIL);
+            localStorage.setItem(STORAGE_SESSION_KEY, 'true');
+            localStorage.setItem(STORAGE_EMAIL_KEY, session.user.email || AUTHORIZED_OWNER_EMAIL);
+          } else {
+            // Unauthorized account signed in - purge immediately
+            supabase?.auth.signOut();
+            setIsAuthenticated(false);
+            setUserEmail(null);
+            localStorage.removeItem(STORAGE_SESSION_KEY);
+            localStorage.removeItem(STORAGE_EMAIL_KEY);
+          }
+        } else {
+          setIsAuthenticated(false);
+          setUserEmail(null);
+          localStorage.removeItem(STORAGE_SESSION_KEY);
+          localStorage.removeItem(STORAGE_EMAIL_KEY);
         }
       });
 
+      // 2. Listen for auth changes (login, logout, token refresh, recovery)
       const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
         if (session?.user) {
-          setIsAuthenticated(true);
-          setUserEmail(session.user.email || 'admin@aestheticlook.pro');
-          setIsDemoAuth(false);
-          localStorage.setItem(DEMO_STORAGE_KEY, 'true');
-          localStorage.setItem('aesthetic_look_admin_email', session.user.email || '');
-        } else if (!isDemoAuth) {
+          const email = (session.user.email || '').toLowerCase();
+          if (email === AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+            setIsAuthenticated(true);
+            setUserEmail(session.user.email || AUTHORIZED_OWNER_EMAIL);
+            localStorage.setItem(STORAGE_SESSION_KEY, 'true');
+            localStorage.setItem(STORAGE_EMAIL_KEY, session.user.email || AUTHORIZED_OWNER_EMAIL);
+          } else {
+            supabase?.auth.signOut();
+            setIsAuthenticated(false);
+            setUserEmail(null);
+            localStorage.removeItem(STORAGE_SESSION_KEY);
+            localStorage.removeItem(STORAGE_EMAIL_KEY);
+          }
+        } else {
           setIsAuthenticated(false);
           setUserEmail(null);
-          localStorage.removeItem(DEMO_STORAGE_KEY);
-          localStorage.removeItem('aesthetic_look_admin_email');
+          localStorage.removeItem(STORAGE_SESSION_KEY);
+          localStorage.removeItem(STORAGE_EMAIL_KEY);
         }
       });
 
       return () => subscription.unsubscribe();
     }
-  }, [isDemoAuth]);
+  }, []);
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    if (isSupabaseConfigured && supabase) {
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // 1. Strict Owner Authorization Check
+    if (trimmedEmail !== AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+      return {
+        success: false,
+        error: `Unauthorized: Only the verified owner (${AUTHORIZED_OWNER_EMAIL}) is permitted access.`,
+      };
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        success: false,
+        error: 'Supabase credentials are not configured in your application environment. Please check your Supabase Project URL and Public Key.',
+      };
+    }
+
+    try {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: trimmedEmail,
         password,
       });
 
@@ -65,44 +109,103 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return { success: false, error: error.message };
       }
 
+      if (!data.user || data.user.email?.toLowerCase() !== AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+        await supabase.auth.signOut();
+        return {
+          success: false,
+          error: `Unauthorized: Only the verified owner (${AUTHORIZED_OWNER_EMAIL}) is permitted access.`,
+        };
+      }
+
       setIsAuthenticated(true);
-      setUserEmail(data.user.email || email);
-      setIsDemoAuth(false);
-      localStorage.setItem(DEMO_STORAGE_KEY, 'true');
-      localStorage.setItem('aesthetic_look_admin_email', data.user.email || email);
+      setUserEmail(data.user.email || AUTHORIZED_OWNER_EMAIL);
+      localStorage.setItem(STORAGE_SESSION_KEY, 'true');
+      localStorage.setItem(STORAGE_EMAIL_KEY, data.user.email || AUTHORIZED_OWNER_EMAIL);
       return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Authentication error.' };
     }
-
-    // If Supabase not yet configured, allow admin credentials fallback
-    if (email.trim().length > 0 && password.trim().length >= 4) {
-      demoLogin();
-      return { success: true };
-    }
-
-    return { success: false, error: 'Please enter valid credentials (min 4 characters).' };
-  };
-
-  const demoLogin = () => {
-    setIsAuthenticated(true);
-    setUserEmail('admin@aestheticlook.pro');
-    setIsDemoAuth(true);
-    localStorage.setItem(DEMO_STORAGE_KEY, 'true');
-    localStorage.setItem('aesthetic_look_admin_email', 'admin@aestheticlook.pro');
-    localStorage.setItem('aesthetic_look_is_demo', 'true');
   };
 
   const logout = async () => {
-    if (isSupabaseConfigured && supabase) {
+    if (supabase) {
       try {
         await supabase.auth.signOut();
       } catch {}
     }
     setIsAuthenticated(false);
     setUserEmail(null);
-    setIsDemoAuth(false);
-    localStorage.removeItem(DEMO_STORAGE_KEY);
-    localStorage.removeItem('aesthetic_look_admin_email');
-    localStorage.removeItem('aesthetic_look_is_demo');
+    localStorage.removeItem(STORAGE_SESSION_KEY);
+    localStorage.removeItem(STORAGE_EMAIL_KEY);
+  };
+
+  const sendPasswordReset = async (email: string): Promise<{ success: boolean; error?: string }> => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (trimmedEmail !== AUTHORIZED_OWNER_EMAIL.toLowerCase()) {
+      return {
+        success: false,
+        error: `Password reset is restricted to the verified website owner (${AUTHORIZED_OWNER_EMAIL}).`,
+      };
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        success: false,
+        error: 'Supabase credentials are not configured.',
+      };
+    }
+
+    try {
+      const redirectUrl = `${window.location.origin}/admin/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
+        redirectTo: redirectUrl,
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to send recovery email.' };
+    }
+  };
+
+  const changePassword = async (newPassword: string): Promise<{ success: boolean; error?: string }> => {
+    if (!isAuthenticated || !userEmail) {
+      return {
+        success: false,
+        error: 'Current authenticated session is required before changing password. Please sign in.',
+      };
+    }
+
+    if (newPassword.length < 8) {
+      return {
+        success: false,
+        error: 'Password must be at least 8 characters long.',
+      };
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      return {
+        success: false,
+        error: 'Supabase client unavailable.',
+      };
+    }
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword,
+      });
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to change password.' };
+    }
   };
 
   return (
@@ -110,10 +213,11 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       value={{
         isAuthenticated,
         userEmail,
+        ownerEmail: AUTHORIZED_OWNER_EMAIL,
         login,
         logout,
-        isDemoAuth,
-        demoLogin,
+        sendPasswordReset,
+        changePassword,
       }}
     >
       {children}

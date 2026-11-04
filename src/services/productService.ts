@@ -5,6 +5,14 @@ import { generateSlug } from '../utils/pricing';
 
 const LOCAL_STORAGE_KEY = 'aesthetic_look_products';
 
+function checkOwnerAuthorized(): void {
+  const sessionActive = localStorage.getItem('aesthetic_look_owner_session') === 'true';
+  const email = (localStorage.getItem('aesthetic_look_owner_email') || '').toLowerCase();
+  if (!sessionActive || email !== 'ashokboya4173@gmail.com') {
+    throw new Error('Unauthorized: Only verified owner (ashokboya4173@gmail.com) can manage catalog products.');
+  }
+}
+
 function getLocalProducts(): Product[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -159,6 +167,7 @@ export const productService = {
   async createProduct(
     productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<Product> {
+    checkOwnerAuthorized();
     const slug = productData.slug || generateSlug(productData.name);
 
     if (isSupabaseConfigured && supabase) {
@@ -217,6 +226,7 @@ export const productService = {
   },
 
   async updateProduct(id: string, updates: Partial<Product>): Promise<Product> {
+    checkOwnerAuthorized();
     if (isSupabaseConfigured && supabase) {
       const updatePayload: Record<string, any> = {};
       if (updates.name !== undefined) updatePayload.name = updates.name;
@@ -275,6 +285,7 @@ export const productService = {
   },
 
   async deleteProduct(id: string): Promise<boolean> {
+    checkOwnerAuthorized();
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase.from('products').delete().eq('id', id);
       if (error) throw new Error(error.message);

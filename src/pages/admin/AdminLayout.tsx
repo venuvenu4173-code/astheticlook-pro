@@ -21,7 +21,7 @@ import { isSupabaseConfigured } from '../../lib/supabase';
 import { useApp } from '../../context/AppContext';
 
 export const AdminLayout: React.FC = () => {
-  const { userEmail, logout, isDemoAuth } = useAdminAuth();
+  const { userEmail, logout } = useAdminAuth();
   const { settings } = useApp();
   const navigate = useNavigate();
 
@@ -111,15 +111,16 @@ export const AdminLayout: React.FC = () => {
         {/* User profile & actions */}
         <div className="p-4 border-t border-[#2A2622] flex items-center justify-between text-xs">
           <div className="min-w-0 pr-2">
-            <p className="font-medium text-white truncate text-[11px]">{userEmail}</p>
-            <p className="text-[10px] text-[#8C7E74]">
-              {isDemoAuth ? 'Admin Demo Mode' : 'Super Administrator'}
+            <p className="font-medium text-white truncate text-[11px] font-mono">{userEmail || 'ashokboya4173@gmail.com'}</p>
+            <p className="text-[10px] text-[#C29B62] font-semibold flex items-center gap-1">
+              <ShieldCheck className="w-3 h-3 text-[#C29B62]" />
+              <span>Owner Administrator</span>
             </p>
           </div>
           <button
             onClick={handleLogout}
             title="Log out of admin"
-            className="p-1.5 text-[#A69B91] hover:text-white hover:bg-[#26221E] rounded-lg transition-colors"
+            className="p-1.5 text-[#A69B91] hover:text-white hover:bg-[#26221E] rounded-lg transition-colors cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
           </button>

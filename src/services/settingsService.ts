@@ -4,6 +4,14 @@ import { INITIAL_SETTINGS } from '../data/seedData';
 
 const LOCAL_STORAGE_KEY = 'aesthetic_look_settings';
 
+function checkOwnerAuthorized(): void {
+  const sessionActive = localStorage.getItem('aesthetic_look_owner_session') === 'true';
+  const email = (localStorage.getItem('aesthetic_look_owner_email') || '').toLowerCase();
+  if (!sessionActive || email !== 'ashokboya4173@gmail.com') {
+    throw new Error('Unauthorized: Only verified owner (ashokboya4173@gmail.com) can update settings.');
+  }
+}
+
 export const settingsService = {
   async getSettings(): Promise<WebsiteSettings> {
     if (isSupabaseConfigured && supabase) {
@@ -34,6 +42,7 @@ export const settingsService = {
   },
 
   async updateSettings(settings: WebsiteSettings): Promise<WebsiteSettings> {
+    checkOwnerAuthorized();
     if (isSupabaseConfigured && supabase) {
       try {
         await supabase

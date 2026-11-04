@@ -34,6 +34,7 @@ import { AdminImageLibrary } from './pages/admin/AdminImageLibrary';
 import { AdminAnalytics } from './pages/admin/AdminAnalytics';
 import { AdminSettings } from './pages/admin/AdminSettings';
 import { AdminSupabaseSetup } from './pages/admin/AdminSupabaseSetup';
+import { AdminResetPassword } from './pages/admin/AdminResetPassword';
 
 // Scroll to top helper on route change
 function ScrollToTop() {
@@ -46,8 +47,8 @@ function ScrollToTop() {
 
 // Protected Route Guard for Admin
 function AdminRouteGuard({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAdminAuth();
-  if (!isAuthenticated) {
+  const { isAuthenticated, userEmail, ownerEmail } = useAdminAuth();
+  if (!isAuthenticated || userEmail?.toLowerCase() !== ownerEmail.toLowerCase()) {
     return <Navigate to="/admin/login" replace />;
   }
   return <>{children}</>;
@@ -157,6 +158,7 @@ export default function App() {
 
             {/* Admin Authentication */}
             <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin/reset-password" element={<AdminResetPassword />} />
 
             {/* Protected Admin Console Routes */}
             <Route

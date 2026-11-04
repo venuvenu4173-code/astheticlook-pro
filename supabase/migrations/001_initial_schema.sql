@@ -130,19 +130,40 @@ ALTER TABLE public.affiliate_clicks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admin_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.website_settings ENABLE ROW LEVEL SECURITY;
 
--- Helper function to identify authenticated admins
+-- Helper function to identify authenticated owner admin
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN AS $$
 BEGIN
     RETURN (
         auth.role() = 'authenticated'
-        OR EXISTS (
-            SELECT 1 FROM public.admin_profiles
-            WHERE id = auth.uid() AND role = 'admin'
+        AND (
+            LOWER(COALESCE(auth.jwt() ->> 'email', '')) = 'ashokboya4173@gmail.com'
+            OR EXISTS (
+                SELECT 1 FROM public.admin_profiles
+                WHERE id = auth.uid() AND role IN ('owner_admin', 'admin')
+            )
         )
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to auto-provision owner_admin profile when user is created in Supabase Auth
+CREATE OR REPLACE FUNCTION public.handle_admin_auth_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF LOWER(NEW.email) = 'ashokboya4173@gmail.com' THEN
+        INSERT INTO public.admin_profiles (id, role)
+        VALUES (NEW.id, 'owner_admin')
+        ON CONFLICT (id) DO UPDATE SET role = 'owner_admin';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_admin_created ON auth.users;
+CREATE TRIGGER on_auth_user_admin_created
+AFTER INSERT OR UPDATE OF email ON auth.users
+FOR EACH ROW EXECUTE FUNCTION public.handle_admin_auth_user();
 
 -- ------------------------------------------------------------------------------
 -- 10. CATEGORIES POLICIES
@@ -272,14 +293,14 @@ USING (bucket_id = 'product-images');
 DROP POLICY IF EXISTS "Admins can upload to product images bucket" ON storage.objects;
 CREATE POLICY "Admins can upload to product images bucket"
 ON storage.objects FOR INSERT
-WITH CHECK (bucket_id = 'product-images' AND auth.role() = 'authenticated');
+WITH CHECK (bucket_id = 'product-images' AND public.is_admin());
 
 DROP POLICY IF EXISTS "Admins can update in product images bucket" ON storage.objects;
 CREATE POLICY "Admins can update in product images bucket"
 ON storage.objects FOR UPDATE
-USING (bucket_id = 'product-images' AND auth.role() = 'authenticated');
+USING (bucket_id = 'product-images' AND public.is_admin());
 
 DROP POLICY IF EXISTS "Admins can delete from product images bucket" ON storage.objects;
 CREATE POLICY "Admins can delete from product images bucket"
 ON storage.objects FOR DELETE
-USING (bucket_id = 'product-images' AND auth.role() = 'authenticated');
+USING (bucket_id = 'product-images' AND public.is_admin());

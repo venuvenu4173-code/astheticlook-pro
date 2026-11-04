@@ -5,6 +5,14 @@ import { generateSlug } from '../utils/pricing';
 
 const LOCAL_STORAGE_KEY = 'aesthetic_look_categories';
 
+function checkOwnerAuthorized(): void {
+  const sessionActive = localStorage.getItem('aesthetic_look_owner_session') === 'true';
+  const email = (localStorage.getItem('aesthetic_look_owner_email') || '').toLowerCase();
+  if (!sessionActive || email !== 'ashokboya4173@gmail.com') {
+    throw new Error('Unauthorized: Only verified owner (ashokboya4173@gmail.com) can manage categories.');
+  }
+}
+
 function getLocalCategories(): Category[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -61,6 +69,7 @@ export const categoryService = {
   },
 
   async createCategory(data: { name: string; slug?: string; imagePath?: string }): Promise<Category> {
+    checkOwnerAuthorized();
     const slug = data.slug || generateSlug(data.name);
 
     if (isSupabaseConfigured && supabase) {
@@ -104,6 +113,7 @@ export const categoryService = {
   },
 
   async updateCategory(id: string, updates: Partial<Category>): Promise<Category> {
+    checkOwnerAuthorized();
     if (isSupabaseConfigured && supabase) {
       const payload: Record<string, any> = {};
       if (updates.name !== undefined) payload.name = updates.name;
@@ -141,6 +151,7 @@ export const categoryService = {
   },
 
   async deleteCategory(id: string): Promise<boolean> {
+    checkOwnerAuthorized();
     if (isSupabaseConfigured && supabase) {
       const { error } = await supabase.from('categories').delete().eq('id', id);
       if (error) throw new Error(error.message);

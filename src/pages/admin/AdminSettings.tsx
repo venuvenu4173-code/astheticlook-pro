@@ -1,12 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Save, CheckCircle2, Globe, Instagram, Mail, ShieldAlert } from 'lucide-react';
+import { Save, CheckCircle2, Globe, Instagram, Mail, ShieldCheck, Lock, AlertCircle, KeyRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAdminAuth, AUTHORIZED_OWNER_EMAIL } from './AdminAuthContext';
 import { WebsiteSettings } from '../../types';
 
 export const AdminSettings: React.FC = () => {
   const { settings, updateSettings } = useApp();
+  const { userEmail, changePassword, isAuthenticated } = useAdminAuth();
   const [form, setForm] = useState<WebsiteSettings>(settings);
   const [savedNotice, setSavedNotice] = useState(false);
+
+  // Password change state
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
 
   useEffect(() => {
     setForm(settings);
@@ -21,6 +30,40 @@ export const AdminSettings: React.FC = () => {
     await updateSettings(form);
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(false);
+
+    if (!isAuthenticated) {
+      setPasswordError('Authenticated session required. Please sign in again.');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError('Password must be at least 8 characters long.');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match. Please re-enter.');
+      return;
+    }
+
+    setPasswordLoading(true);
+    const res = await changePassword(newPassword);
+    setPasswordLoading(false);
+
+    if (res.success) {
+      setPasswordSuccess(true);
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPasswordSuccess(false), 4000);
+    } else {
+      setPasswordError(res.error || 'Failed to update password.');
+    }
   };
 
   return (
@@ -197,13 +240,122 @@ export const AdminSettings: React.FC = () => {
         <div className="flex justify-end pt-2">
           <button
             type="submit"
-            className="flex items-center gap-2 px-8 py-3 bg-[#1A1816] hover:bg-[#2C2622] text-[#FAF8F5] rounded-xl text-xs uppercase tracking-wider font-semibold transition-colors shadow-md"
+            className="flex items-center gap-2 px-8 py-3 bg-[#1A1816] hover:bg-[#2C2622] text-[#FAF8F5] rounded-xl text-xs uppercase tracking-wider font-semibold transition-colors shadow-md cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>Save Settings</span>
           </button>
         </div>
       </form>
+
+      {/* Owner Account Security & Change Password */}
+      <div className="bg-white border border-[#E8E2D7] rounded-2xl p-6 sm:p-8 space-y-6 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#F0EAE1] gap-2">
+          <div>
+            <h3 className="font-serif text-lg font-bold text-[#1A1816] flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-[#B87A44]" />
+              <span>Owner Account & Security</span>
+            </h3>
+            <p className="text-xs text-[#7A6E65] mt-0.5">
+              Manage your Supabase Auth credentials and password for the verified owner administrator.
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-[#FAF8F5] border border-[#D8D2C6] rounded-full text-[11px] font-semibold text-[#1A1816]">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#2E7D44]" />
+            <span>Session Authenticated</span>
+          </div>
+        </div>
+
+        {/* Current Owner Details */}
+        <div className="p-4 bg-[#FAF8F5] border border-[#E8E2D7] rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div>
+            <span className="text-[10px] uppercase tracking-wider font-bold text-[#8C7E74] block">
+              Authorized Owner Email
+            </span>
+            <span className="font-mono text-sm font-bold text-[#1A1816]">
+              {AUTHORIZED_OWNER_EMAIL}
+            </span>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] uppercase tracking-wider font-bold text-[#8C7E74] block">
+              Access Role
+            </span>
+            <span className="font-semibold text-[#B87A44]">
+              Website Owner Administrator
+            </span>
+          </div>
+        </div>
+
+        {/* Feedback notices */}
+        {passwordSuccess && (
+          <div className="p-4 bg-[#F0F7F2] border border-[#CDE5D4] rounded-xl text-xs text-[#2E7D44] font-medium flex items-center gap-2 animate-fade-in">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>Password updated successfully in Supabase Auth! Your new password is now active.</span>
+          </div>
+        )}
+
+        {passwordError && (
+          <div className="p-4 bg-[#FAF0ED] border border-[#F2C4B8] rounded-xl text-xs text-[#8E3B29] font-medium flex items-center gap-2 animate-fade-in">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{passwordError}</span>
+          </div>
+        )}
+
+        {/* Change Password Form */}
+        <form onSubmit={handlePasswordChange} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-[#7A6E65] font-semibold mb-1">
+                New Password (Min. 8 characters)
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#A69B91] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#FAF8F5] border border-[#D8D2C6] rounded-xl text-sm text-[#1A1816] placeholder-[#A69B91] focus:outline-none focus:border-[#1A1816]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-wider text-[#7A6E65] font-semibold mb-1">
+                Confirm New Password
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#A69B91] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  minLength={8}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full pl-10 pr-4 py-2.5 bg-[#FAF8F5] border border-[#D8D2C6] rounded-xl text-sm text-[#1A1816] placeholder-[#A69B91] focus:outline-none focus:border-[#1A1816]"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-[11px] text-[#8C7E74]">
+              Requires current authenticated session. Updates user credentials directly in Supabase.
+            </p>
+            <button
+              type="submit"
+              disabled={passwordLoading}
+              className="flex items-center gap-2 px-6 py-2.5 bg-[#1A1816] hover:bg-[#2C2622] text-[#FAF8F5] rounded-xl text-xs uppercase tracking-wider font-semibold transition-colors shadow-md disabled:opacity-50 cursor-pointer"
+            >
+              <Lock className="w-3.5 h-3.5" />
+              <span>{passwordLoading ? 'Updating...' : 'Update Password'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 };
